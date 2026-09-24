@@ -59,6 +59,8 @@ PYTHONPATH=src python3 -m plant_science.acceptance --workspace .
 
 `src/photon_fab/` 提供光电芯片批次、光谱测量、科学计算、质量审批和审计的离线后台。SQLite 保存完整批次生命周期，角色权限覆盖操作员、工程师、质量人员和管理员；峰值波长、噪声 RMS、响应度、置信区间及良率计算均为确定性本地算法。
 
+仪器校准证书按 `(证书编号, 版本)` 登记，版本行写入后不可改写，撤销以追加记录方式生效；每条光谱测量写入前校验仪器在测量时刻持有有效（未过期、未撤销）证书，并把证书编号与版本永久保存在测量记录中，证书后续变更不会改写历史测量。管理员负责登记和撤销证书，质量人员可查看证书审计轨迹，其他角色只读。HTTP 接口：`POST /certificates` 登记、`GET /certificates/{id}` 查询证书、`POST /certificates/{id}/revoke` 撤销、`GET /certificates/{id}/audit` 审计、`GET /instruments/{name}/calibration[?at=...]` 有效期查询。
+
 ```bash
 PYTHONPATH=src python3 -m photon_fab.acceptance
 PYTHONPATH=src python3 -m photon_fab.api --database photon.sqlite3 --port 8080

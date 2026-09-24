@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qs, urlparse
 
 from .service import PhotonService
 
@@ -23,12 +24,23 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
             return self._json(200, {"status": "ok", "service": "photon-fab"})
-        if self.path.startswith("/lots/"):
-            try:
-                token = self.headers.get("Authorization", "").removeprefix("Bearer ")
-                return self._json(200, self.service.get_lot(token, self.path.split("/", 2)[2]))
-            except Exception as exc:
-                return self._json(400, {"error": str(exc)})
+        parsed = urlparse(self.path)
+        parts = [p for p in parsed.path.split("/") if p]
+        token = self.headers.get("Authorization", "").removeprefix("Bearer ")
+        try:
+            if len(parts) == 2 and parts[0] == "lots":
+                return self._json(200, self.service.get_lot(token, parts[1]))
+            if len(parts) == 2 and parts[0] == "certificates":
+                return self._json(200, self.service.get_certificate(token, parts[1]))
+            if len(parts) == 3 and parts[0] == "certificates" and parts[2] == "audit":
+                return self._json(200, {"events": self.service.certificate_audit(token, parts[1])})
+            if len(parts) == 3 and parts[0] == "instruments" and parts[2] == "calibration":
+                at = parse_qs(parsed.query).get("at", [None])[0]
+                return self._json(200, self.service.certificate_validity(token, parts[1], at))
+        except PermissionError as exc:
+            return self._json(403, {"error": str(exc)})
+        except Exception as exc:
+            return self._json(400, {"error": str(exc)})
         return self._json(404, {"error": "not found"})
 
     def do_POST(self):
@@ -39,6 +51,10 @@ class Handler(BaseHTTPRequestHandler):
             token = self.headers.get("Authorization", "").removeprefix("Bearer ")
             if self.path == "/lots":
                 return self._json(201, self.service.create_lot(token, body["lot_id"], body["product"], body["process_rev"], body["wafer_count"]))
+            if self.path == "/certificates":
+                return self._json(201, self.service.register_certificate(token, body["cert_id"], body["instrument"], body["issuer"], body["valid_from"], body["valid_until"]))
+            if self.path.startswith("/certificates/") and self.path.endswith("/revoke"):
+                return self._json(200, self.service.revoke_certificate(token, self.path.split("/")[2], body["reason"]))
             if self.path.startswith("/lots/") and self.path.endswith("/measurements"):
                 lot_id = self.path.split("/")[2]
                 return self._json(201, self.service.add_measurement(token, lot_id, body["wavelength_nm"], body["response"], body.get("noise", 0.0), body["instrument"]))
@@ -59,7 +75,8 @@ def main() -> None:
     args = parser.parse_args()
     Handler.service = PhotonService(args.database)
     Handler.service.bootstrap_admin()
-    ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
+    # 单一 SQLite 连接同一时刻只允许一个写事务，按请求串行处理。
+    HTTPServer((args.host, args.port), Handler).serve_forever()
 
 
 if __name__ == "__main__":
