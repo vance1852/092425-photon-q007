@@ -12,6 +12,8 @@ def run() -> dict:
     service = PhotonService()
     service.bootstrap_admin()
     token = service.auth.login("admin", "photon-admin")
+    service.register_certificate(token, "CERT-DEMO-1", "spectrometer-1", "2026-01-01T00:00:00+00:00", "2027-01-01T00:00:00+00:00")
+    service.verify_certificate(token, "spectrometer-1")
     service.create_lot(token, "LOT-DEMO", "CMOS image sensor", "P3.2", 10)
     for wavelength, response in ((450, .71), (520, .93), (650, .84)):
         service.add_measurement(token, "LOT-DEMO", wavelength, response, .01, "spectrometer-1")

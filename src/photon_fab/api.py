@@ -23,13 +23,25 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
             return self._json(200, {"status": "ok", "service": "photon-fab"})
-        if self.path.startswith("/lots/"):
-            try:
-                token = self.headers.get("Authorization", "").removeprefix("Bearer ")
+        try:
+            token = self.headers.get("Authorization", "").removeprefix("Bearer ")
+            if self.path.startswith("/lots/"):
                 return self._json(200, self.service.get_lot(token, self.path.split("/", 2)[2]))
-            except Exception as exc:
-                return self._json(400, {"error": str(exc)})
-        return self._json(404, {"error": "not found"})
+            if self.path == "/certificates":
+                return self._json(200, {"certificates": self.service.list_certificates(token)})
+            if self.path.startswith("/certificates/"):
+                parts = self.path.split("/")
+                if len(parts) == 3:
+                    return self._json(200, self.service.get_certificate(token, parts[2]))
+                if len(parts) == 4 and parts[3] == "audit":
+                    return self._json(200, {"events": self.service.certificate_audit(token, parts[2])})
+            return self._json(404, {"error": "not found"})
+        except PermissionError as exc:
+            return self._json(403, {"error": str(exc)})
+        except KeyError as exc:
+            return self._json(404, {"error": str(exc)})
+        except Exception as exc:
+            return self._json(400, {"error": str(exc)})
 
     def do_POST(self):
         try:
@@ -39,6 +51,12 @@ class Handler(BaseHTTPRequestHandler):
             token = self.headers.get("Authorization", "").removeprefix("Bearer ")
             if self.path == "/lots":
                 return self._json(201, self.service.create_lot(token, body["lot_id"], body["product"], body["process_rev"], body["wafer_count"]))
+            if self.path == "/certificates":
+                return self._json(201, self.service.register_certificate(token, body["certificate_id"], body["instrument"], body["valid_from"], body["valid_until"], body.get("issued_at")))
+            if self.path == "/certificates/verify":
+                return self._json(200, self.service.verify_certificate(token, body["instrument"], body.get("at")))
+            if self.path.startswith("/certificates/") and self.path.endswith("/revoke"):
+                return self._json(200, self.service.revoke_certificate(token, self.path.split("/")[2], body["reason"]))
             if self.path.startswith("/lots/") and self.path.endswith("/measurements"):
                 lot_id = self.path.split("/")[2]
                 return self._json(201, self.service.add_measurement(token, lot_id, body["wavelength_nm"], body["response"], body.get("noise", 0.0), body["instrument"]))
@@ -47,6 +65,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(404, {"error": "not found"})
         except PermissionError as exc:
             return self._json(403, {"error": str(exc)})
+        except KeyError as exc:
+            return self._json(404, {"error": str(exc)})
         except Exception as exc:
             return self._json(400, {"error": str(exc)})
 
